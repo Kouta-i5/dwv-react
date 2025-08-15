@@ -1,267 +1,183 @@
-import React from 'react';
-import { styled } from '@mui/material/styles';
+// UI部品（MUI）をインポート
 import {
-  InputAdornment,
-  TextField,
-  Paper,
-  Table,
-  TableContainer,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  Slider,
-  Stack,
-  Box
-} from '@mui/material';
+  Box, InputAdornment, Paper, Slider, Stack, Table, TableBody, TableCell,
+  TableContainer, TableHead, TableRow, TextField
+} from '@mui/material'; // 表や入力
+import { styled } from '@mui/material/styles'; // スタイルユーティリティ
+import React, { useCallback, useMemo, useState } from 'react'; // フック群
 
-import { getTagFromKey } from 'dwv';
+// DICOMタグ辞書ヘルパ
+import { getTagFromKey } from 'dwv'; // タグキー→人名解決
 
-import Search from '@mui/icons-material/Search';
+// 検索アイコン
+import Search from '@mui/icons-material/Search'; // 先頭アイコン
 
-const PREFIX = 'TagsTable';
+// CSSクラス接頭辞
+const PREFIX = 'TagsTable'; // 名前空間
+// クラス名まとめ
 const classes = {
-  flex: `${PREFIX}-flex`,
-  spacer: `${PREFIX}-spacer`,
-  searchField: `${PREFIX}-searchField`,
-  slider: `${PREFIX}-slider`,
-  container: `${PREFIX}-container`
+  flex: `${PREFIX}-flex`,           // 伸縮スペーサ
+  spacer: `${PREFIX}-spacer`,       // 余白
+  searchField: `${PREFIX}-searchField`, // 検索入力幅
+  slider: `${PREFIX}-slider`,       // スライダ余白
+  container: `${PREFIX}-container`  // ルート
 };
 
-const Root = styled('div')(({theme}) => ({
-  [`& .${classes.flex}`]: {
-    flex: 1,
-  },
-
-  [`& .${classes.spacer}`]: {
-    flex: '1 1 100%',
-  },
-
-  [`& .${classes.searchField}`]: {
-    width: "45%"
-  },
-
-  [`& .${classes.slider}`]: {
-    margin: 20
-  },
-
-  [`&.${classes.container}`]: {
-    padding: 10,
-    overflow: "hidden"
-  }
+// スコープドスタイル
+const Root = styled('div')(({ theme }) => ({ // ルート用
+  [`& .${classes.flex}`]: { flex: 1 },                 // 伸縮
+  [`& .${classes.spacer}`]: { flex: '1 1 100%' },      // 余白
+  [`& .${classes.searchField}`]: { width: '45%' },     // 入力幅
+  [`& .${classes.slider}`]: { margin: 20 },            // 余白
+  [`&.${classes.container}`]: { padding: 10, overflow: 'hidden' } // 内側余白
 }));
 
-class TagsTable extends React.Component {
+// 関数コンポーネント
+const TagsTable = ({ data }) => { // props: data=全メタ
+  // propsから初期メタを受け取る（undefined対策）
+  const fullMetaData = data || {}; // 空オブジェクトでガード
 
-  constructor(props) {
-    super(props);
+  // DICOMメタかどうかを判定
+  const isDicomMeta = useMemo(() => typeof fullMetaData['00020010'] !== 'undefined', [fullMetaData]); // FileMeta有無
 
-    const fullMetaData = this.props.data;
+  // InstanceNumber配列を抽出（なければ空）
+  const instanceNumbers = useMemo(() => { // スライダ候補
+    const el = fullMetaData['00200013']; // InstanceNumberタグ
+    if (typeof el === 'undefined') return []; // なし
+    let vals = el.value; // 値（配列/文字列）
+    if (typeof vals === 'string') vals = [vals]; // 文字列→配列
+    const nums = vals.map(Number).filter((v) => !Number.isNaN(v)); // 数値化
+    nums.sort((a, b) => a - b); // 昇順
+    return nums; // 返却
+  }, [fullMetaData]); // 依存
 
-    this.state = {
-      fullMetaData: fullMetaData,
-      searchfor: "",
-      instanceNumber: 0
-    };
+  // スライダの最小/最大インデックス
+  const sliderMin = 0;                           // 最小インデックス
+  const sliderMax = Math.max(0, instanceNumbers.length - 1); // 最大インデックス
 
-    // set slider with instance numbers ('00200013')
-    const instanceElement = fullMetaData['00200013'];
-    if (typeof instanceElement !== 'undefined') {
-      let instanceNumberValue = instanceElement.value;
-      if (typeof instanceNumberValue === 'string') {
-        instanceNumberValue = [instanceNumberValue];
+  // 現在のスライダ位置（インデックス）と対応する実InstanceNumber
+  const [sliderIndex, setSliderIndex] = useState(sliderMin);  // インデックス
+  const instanceNumber = instanceNumbers.length ? instanceNumbers[sliderIndex] : 0; // 実値
+
+  // 検索語
+  const [searchfor, setSearchfor] = useState(''); // 小文字比較用
+
+  // DICOMでない場合の reduce（key/valueフラット化）
+  const reducePlainTags = useCallback((tagData) => (acc, key) => { // 平坦化
+    acc.push({ name: key, value: tagData[key].value }); // 1行追加
+    return acc; // 蓄積を返す
+  }, []); // 依存なし
+
+  // DICOMのタグを再帰的にフラットにする reducer を生成
+  const reduceDicomTags = useCallback((tagData, instNum, prefix = '') => { // 再帰reducer
+    // reducer本体（keys.reduceに渡す関数）を返す
+    const reducer = (acc, key) => { // 1タグ処理
+      const tag = getTagFromKey(key); // キー→タグ情報
+      let name = tag.getNameFromDictionary(); // 人が読める名前
+      if (typeof name === 'undefined') name = 'x' + tag.getKey(); // 未知タグはキー
+      const el = tagData[key]; // 要素
+      let val = el.value; // 値（配列/TypedArrayの可能性）
+      // Multi-value（TypedArray含む）かつインスタンスごと値がある場合
+      if (typeof val !== 'string' && typeof val !== 'number' &&
+          typeof val?.slice === 'undefined' && typeof val?.[instNum] !== 'undefined') {
+        val = val[instNum]; // 指定インスタンスの値
       }
-      // convert string to numbers
-      this.state.instanceNumbers = instanceNumberValue.map(Number);
-      this.state.instanceNumbers.sort((a, b) => a - b);
-      this.state.sliderMin = 0;
-      this.state.sliderMax = this.state.instanceNumbers.length - 1;
-      this.state.instanceNumber = this.state.instanceNumbers[
-        this.state.sliderMin
-      ];
-    }
-
-    this.state.displayData = this.getMetaArray(this.state.instanceNumber);
-
-    // bind listener
-    this.filterList = this.filterList.bind(this);
-  }
-
-  filterList(search, instanceNumber) {
-    var searchLo = search.toLowerCase();
-    var metaArray = this.getMetaArray(instanceNumber);
-    var updatedList = metaArray.filter( function (item) {
-      for ( var key in item ) {
-        if( item.hasOwnProperty(key) ) {
-          var value = item[key];
-          if (typeof value !== 'undefined') {
-            if ( typeof value !== "string" ) {
-              value = value.toString();
-            }
-            if ( value.toLowerCase().indexOf(searchLo) !== -1 ) {
-              return true;
-            }
-          }
-        }
-      }
-      return false;
-    });
-    this.setState({searchfor: search, displayData: updatedList});
-  }
-
-  getMetaArray(instanceNumber) {
-    let reducer;
-    if (this.isDicomMeta(this.state.fullMetaData)) {
-      reducer = this.getDicomTagReducer(this.state.fullMetaData, instanceNumber, '');
-    } else {
-      reducer = this.getTagReducer(this.state.fullMetaData);
-    }
-    const keys = Object.keys(this.state.fullMetaData);
-    return keys.reduce(reducer, []);
-  }
-
-  isDicomMeta(meta) {
-    return typeof meta['00020010'] !== 'undefined';
-  }
-
-  getTagReducer(tagData) {
-    return function (accumulator, currentValue) {
-      accumulator.push({
-        name: currentValue,
-        value: tagData[currentValue].value
-      });
-      return accumulator;
-    };
-  }
-
-  getDicomTagReducer(tagData, instanceNumber, prefix) {
-    return (accumulator, currentValue) => {
-      const tag = getTagFromKey(currentValue);
-      let key = tag.getNameFromDictionary();
-      if (typeof key === 'undefined') {
-        // add 'x' to help sorting
-        key = 'x' + tag.getKey();
-      }
-      const name = key;
-      const element = tagData[currentValue];
-      let value = element.value;
-      // possible 'merged' object
-      // (use slice method as test for array and typed array)
-      if (typeof value.slice === 'undefined' &&
-        typeof value[instanceNumber] !== 'undefined') {
-        value = value[instanceNumber];
-      }
-      // force instance number (otherwise takes value in non indexed array)
-      if (name === 'InstanceNumber') {
-        value = instanceNumber;
-      }
-      // recurse for sequence
-      if (element.vr === 'SQ') {
-        // sequence tag
-        accumulator.push({
-          name: (prefix ? prefix + ' ' : '') + name,
-          value: ''
-        });
-        // sequence value
-        for (let i = 0; i < value.length; ++i) {
-          const sqItems = value[i];
-          const keys = Object.keys(sqItems);
-          const res = keys.reduce(
-            this.getDicomTagReducer(sqItems, instanceNumber, prefix + '[' + i + ']'), []
-          );
-          accumulator = accumulator.concat(res);
+      // InstanceNumber表示は現在の値に合わせる
+      if (name === 'InstanceNumber') val = instNum;
+      // シーケンス（SQ）は再帰展開
+      if (el.vr === 'SQ') {
+        acc.push({ name: (prefix ? prefix + ' ' : '') + name, value: '' }); // セクション見出し
+        for (let i = 0; i < val.length; ++i) { // 各itemを処理
+          const child = val[i];                    // 子要素の集合
+          const keys = Object.keys(child);        // 子のキー一覧
+          const childReducer = reduceDicomTags(child, instNum, `${prefix}[${i}]`); // 子reducer
+          const rows = keys.reduce(childReducer, []); // 子要素を平坦化
+          acc = acc.concat(rows);                 // 結果に連結
         }
       } else {
-        // shorten long 'o'ther data
-        if (element.vr[0] === 'O' && value.length > 10) {
-          value = value.slice(0, 10).toString() + '... (len:' + value.length + ')';
+        // Other系の巨大データは先頭だけ
+        if (el.vr?.[0] === 'O' && val?.length > 10) {
+          val = val.slice(0, 10).toString() + `... (len:${val.length})`; // 先頭のみ
         }
-        accumulator.push({
-          name: (prefix ? prefix + ' ' : '') + name,
-          value: value.toString()
-        });
+        acc.push({ name: (prefix ? prefix + ' ' : '') + name, value: String(val) }); // 1行
       }
-      return accumulator;
+      return acc; // 返却
+    };
+    return reducer; // reducerを返す
+  }, []); // 依存なし
+
+  // 現在インスタンスに対するフラットなタグ配列を得る
+  const metaArray = useMemo(() => { // 表示用配列
+    const keys = Object.keys(fullMetaData); // ルートキー一覧
+    if (!keys.length) return []; // 空なら空配列
+    if (isDicomMeta) { // DICOMメタのとき
+      const reducer = reduceDicomTags(fullMetaData, instanceNumber, ''); // 再帰reducer
+      return keys.reduce(reducer, []); // 平坦化
     }
-  }
+    const reducer = reducePlainTags(fullMetaData); // プレーン
+    return keys.reduce(reducer, []); // 平坦化
+  }, [fullMetaData, isDicomMeta, instanceNumber, reduceDicomTags, reducePlainTags]); // 依存
 
-  onSliderChange = (event) => {
-    const sliderValue = parseInt(event.target.value, 10);
-    const instanceNumber = this.state.instanceNumbers[sliderValue];
-    const metaArray = this.getMetaArray(instanceNumber);
-    this.setState({
-      instanceNumber: instanceNumber,
-      displayData: metaArray
+  // 検索語でフィルタした配列を作る
+  const displayData = useMemo(() => { // 表示配列(フィルタ後)
+    const needle = searchfor.toLowerCase(); // 小文字
+    if (!needle) return metaArray; // 空検索ならそのまま
+    return metaArray.filter((row) => { // 各行を判定
+      const n = String(row.name || '').toLowerCase();   // name小文字
+      const v = String(row.value || '').toLowerCase();  // value小文字
+      return n.includes(needle) || v.includes(needle);  // どちらか含む
     });
-    this.filterList(this.state.searchfor, instanceNumber);
-  }
+  }, [metaArray, searchfor]); // 依存
 
-  onSearch = (event) => {
-    var search = event.target.value;
-    this.filterList(search, this.state.instanceNumber);
-  }
+  // スライダ変更（MUIのonChangeは (e, value) で来る）
+  const onSliderChange = useCallback((e, value) => { // スライダ変更
+    if (typeof value === 'number') setSliderIndex(value); // インデックス更新
+  }, []); // 依存なし
 
-  render() {
-    const { displayData, searchfor, sliderMin, sliderMax } = this.state;
+  // 検索入力変更
+  const onSearch = useCallback((e) => { setSearchfor(e.target.value); }, []); // 文字列更新
 
-    return (
-      <Root className={classes.container}>
-        <Stack direction="row" spacing={2}>
-          <TextField
-            id="search"
-            type="search"
-            value={searchfor}
-            className={classes.searchField}
-            onChange={this.onSearch}
-            margin="normal"
-            size="small"
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search />
-                  </InputAdornment>
-                )
-              }
-            }}
+  // JSX（表と検索UI）
+  return (
+    <Root className={classes.container}>{/* ルート */}
+      <Stack direction="row" spacing={2}>{/* 上段: 検索とスライダ */}
+        <TextField
+          id="search" type="search" value={searchfor} className={classes.searchField}
+          onChange={onSearch} margin="normal" size="small"
+          slotProps={{ input: { startAdornment: (<InputAdornment position="start"><Search /></InputAdornment>) } }}
+        />
+        <Box width={300} display="flex" alignItems="center">{/* スライダと現在値 */}
+          <Slider
+            title="Instance number" className={classes.slider} marks
+            min={sliderMin} max={sliderMax} value={sliderIndex} onChange={onSliderChange}
           />
-          <Box width={300} display='flex' alignItems="center">
-            <Slider
-              title="Instance number"
-              className={classes.slider}
-              marks
-              min={sliderMin}
-              max={sliderMax}
-              onChange={this.onSliderChange}
-            />
-            <div title="Instante number">{this.state.instanceNumber}</div>
-          </Box>
-        </Stack>
-        <Paper sx={{ width: '100%', overflow: 'hidden' }}>
-          <TableContainer sx={{ maxHeight: 400 }}>
-            <Table stickyHeader className={classes.table}>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Tag</TableCell>
-                  <TableCell>Value</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-              {displayData.map((item, index) => {
-                return (
-                  <TableRow key={index}>
-                    <TableCell>{item.name}</TableCell>
-                    <TableCell>{item.value}</TableCell>
-                  </TableRow>
-                );
-              })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      </Root>
-    );
-  }
-}
+          <div title="Instance number">{instanceNumber}</div>{/* 現在の実値 */}
+        </Box>
+      </Stack>
 
-export default (TagsTable);
+      <Paper sx={{ width: '100%', overflow: 'hidden' }}>{/* 表コンテナ */}
+        <TableContainer sx={{ maxHeight: 400 }}>{/* スクロールable領域 */}
+          <Table stickyHeader>{/* ヘッダ固定テーブル */}
+            <TableHead>
+              <TableRow>
+                <TableCell>Tag</TableCell>{/* タグ名 */}
+                <TableCell>Value</TableCell>{/* 値 */}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {displayData.map((item, idx) => ( // 各行レンダ
+                <TableRow key={idx}>
+                  <TableCell>{item.name}</TableCell>{/* 名前 */}
+                  <TableCell>{item.value}</TableCell>{/* 値 */}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+    </Root>
+  );
+};
+
+// 既定エクスポート
+export default TagsTable; // 関数コンポーネントを公開

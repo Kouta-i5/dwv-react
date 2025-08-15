@@ -1,543 +1,456 @@
-import React from 'react';
-import { styled } from '@mui/material/styles';
+// MUIのコンポーネントをインポート
 import {
-  Typography,
-  Stack,
-  LinearProgress,
-  Link,
-  IconButton,
-  ToggleButton,
-  ToggleButtonGroup,
-  AppBar,
-  Dialog,
-  Slide,
-  Toolbar
-} from '@mui/material';
+  Alert, AppBar, Button, Chip, Dialog, IconButton, LinearProgress,
+  Slide, Stack, ToggleButton, ToggleButtonGroup, Toolbar, Tooltip, Typography
+} from '@mui/material'; // UI部品一式
+import { styled } from '@mui/material/styles'; // スタイルユーティリティ
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'; // Reactのフック群
 
-import {
-  App,
-  getDwvVersion
-} from 'dwv';
+// DWVのアプリ本体とバージョン取得関数をインポート
+import { App, getDwvVersion } from 'dwv'; // dwvのコアAPI
 
-import TagsTable from './TagsTable.jsx';
+// タグ表示テーブル（後述の関数コンポーネント版）をインポート
+import TagsTable from './TagsTable.jsx'; // DICOMタグ表示用
 
-// https://mui.com/material-ui/material-icons/
-import CloseIcon from '@mui/icons-material/Close';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import MenuIcon from '@mui/icons-material/Menu';
-import ContrastIcon from '@mui/icons-material/Contrast';
-import SearchIcon from '@mui/icons-material/Search';
-import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
-import StraightenIcon from '@mui/icons-material/Straighten';
-import CameraswitchIcon from '@mui/icons-material/Cameraswitch';
+// アイコンをインポート
+import CameraswitchIcon from '@mui/icons-material/Cameraswitch'; // 断面切替
+import CloseIcon from '@mui/icons-material/Close'; // 閉じる
+import ContrastIcon from '@mui/icons-material/Contrast'; // WL/WW
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'; // フォルダ選択
+import LibraryBooksIcon from '@mui/icons-material/LibraryBooks'; // タグ表示
+import MenuIcon from '@mui/icons-material/Menu'; // スクロール
+import RefreshIcon from '@mui/icons-material/Refresh'; // リセット
+import SearchIcon from '@mui/icons-material/Search'; // ズーム/パン
+import StraightenIcon from '@mui/icons-material/Straighten'; // 物差し(計測)
+import UploadFileIcon from '@mui/icons-material/UploadFile'; // ファイル選択
 
-import './DwvComponent.css';
+// スタイルシートをインポート
+import './DwvComponent.css'; // ビューワ周りの見た目
 
-const PREFIX = 'DwvComponent';
+// CSSクラス接頭辞を定義
+const PREFIX = 'DwvComponent'; // 名前空間用
+// クラス名をまとめて定義
 const classes = {
-  appBar: `${PREFIX}-appBar`,
-  title: `${PREFIX}-title`,
-  iconSmall: `${PREFIX}-iconSmall`
+  appBar: `${PREFIX}-appBar`,   // ダイアログ上部バー
+  title: `${PREFIX}-title`,     // タイトル
+  iconSmall: `${PREFIX}-iconSmall` // 小さめアイコン
 };
 
-const Root = styled('div')(({theme}) => ({
-  [`& .${classes.appBar}`]: {
-    position: 'relative',
-  },
-
-  [`& .${classes.title}`]: {
-    flex: '0 0 auto',
-  },
-
-  [`& .${classes.iconSmall}`]: {
-    fontSize: 20,
-  }
+// ルートにスコープドスタイル適用
+const Root = styled('div')(({ theme }) => ({ // ルート用スタイル
+  [`& .${classes.appBar}`]: { position: 'relative' }, // AppBarの位置
+  [`& .${classes.title}`]: { flex: '0 0 auto' },      // タイトルの伸縮
+  [`& .${classes.iconSmall}`]: { fontSize: 20 }       // 小アイコンサイズ
 }));
 
-export const TransitionUp = React.forwardRef((props, ref) => (
-  <Slide direction="up" {...props} ref={ref} />
-))
+// ダイアログの表示遷移（下から上へスライド）
+export const TransitionUp = React.forwardRef((props, ref) => ( // Transition定義
+  <Slide direction="up" {...props} ref={ref} /> // 上方向へ
+)); // forwardRefでMUIに渡す
 
-class DwvComponent extends React.Component {
+// 関数コンポーネント本体
+const DwvComponent = () => { // ビューワ本体
 
-  constructor(props) {
-    super(props);
-    this.state = {
-      versions: {
-        dwv: getDwvVersion(),
-        react: React.version
-      },
-      tools: {
-        Scroll: {},
-        ZoomAndPan: {},
-        WindowLevel: {},
-        Draw: {
-          options: ['Ruler']
-        }
-      },
-      canScroll: false,
-      canWindowLevel: false,
-      selectedTool: 'Select Tool',
-      loadProgress: 0,
-      dataLoaded: false,
-      dwvApp: null,
-      metaData: {},
-      orientation: undefined,
-      showDicomTags: false,
-      dropboxDivId: 'dropBox',
-      dropboxClassName: 'dropBox',
-      borderClassName: 'dropBoxBorder',
-      hoverClassName: 'hover'
-    };
-  }
+  // バージョン情報（初期のみ）
+  const [versions] = useState({ dwv: getDwvVersion(), react: React.version }); // 表示用
 
-  render() {
-    const { versions, tools, loadProgress, dataLoaded, metaData } = this.state;
+  // 有効ツール一覧（固定）
+  const [tools] = useState({ // 使用可能ツール
+    Scroll: {},             // スクロール
+    ZoomAndPan: {},         // ズーム＆パン
+    WindowLevel: {},        // WL/WW
+    Draw: { options: ['Ruler'] } // 計測：物差し
+  }); // 基本ツールセット
 
-    const handleToolChange = (event, newTool) => {
-      if (newTool) {
-        this.onChangeTool(newTool);
+  // 実行可否フラグ
+  const [canScroll, setCanScroll] = useState(false);       // スクロール可否
+  const [canWindowLevel, setCanWindowLevel] = useState(false); // WL可否
+
+  // 選択ツール・進捗・ロード完了
+  const [selectedTool, setSelectedTool] = useState('Select Tool'); // 現在ツール
+  const [loadProgress, setLoadProgress] = useState(0);            // 進捗[%]
+  const [dataLoaded, setDataLoaded] = useState(false);            // ロード完了
+
+  // dwvアプリ・メタデータ
+  const [dwvApp, setDwvApp] = useState(null); // dwvのAppインスタンス
+  const [metaData, setMetaData] = useState({}); // DICOMメタ
+
+  // 表示断面・タグダイアログ表示
+  const [orientation, setOrientation] = useState(undefined); // axial/coronal/sagittal
+  const [showDicomTags, setShowDicomTags] = useState(false); // タグダイアログ
+
+  // ドロップボックス関連のDOM id/クラス（定数）
+  const dropboxDivId = 'dropBox';              // ドロップ領域のid
+  const dropboxClassName = 'dropBox';          // 基本クラス
+  const borderClassName = 'dropBoxBorder';     // 枠線クラス
+  const hoverClassName = 'hover';              // ホバー時クラス
+
+  // フォルダ読み込み用の状態
+  const [folderMap, setFolderMap] = useState(null); // { folderName: File[] }
+  const [folderList, setFolderList] = useState([]); // フォルダ名一覧
+  const [selectedFolder, setSelectedFolder] = useState(null); // 選択中フォルダ
+
+  // input[type=file] を制御するref
+  const inputRef = useRef(null); // 隠しファイル入力を直接操作
+
+  // ツールに対応するアイコンを返す関数
+  const getToolIcon = useCallback((tool) => { // アイコン解決
+    if (tool === 'Scroll') return (<MenuIcon />);         // スクロール
+    if (tool === 'ZoomAndPan') return (<SearchIcon />);   // ズーム/パン
+    if (tool === 'WindowLevel') return (<ContrastIcon />); // WL/WW
+    if (tool === 'Draw') return (<StraightenIcon />);     // 計測
+    return null; // 未定義ツール
+  }, []); // 依存なし
+
+  // ツールの実行可否を判定
+  const canRunTool = useCallback((tool) => { // 実行可能か
+    if (tool === 'Scroll') return canScroll;         // スクロール可
+    if (tool === 'WindowLevel') return canWindowLevel; // WL可
+    return true; // それ以外は常に可
+  }, [canScroll, canWindowLevel]); // フラグ依存
+
+  // 描画形状（計測ツール）の切替
+  const onChangeShape = useCallback((shape) => { // 形状変更
+    if (dwvApp) dwvApp.setToolFeatures({ shapeName: shape }); // dwvに適用
+  }, [dwvApp]); // アプリ依存
+
+  // ツール切替のハンドラ
+  const onChangeTool = useCallback((tool) => { // ツール変更
+    if (!dwvApp) return; // 未初期化なら無視
+    setSelectedTool(tool); // UIの選択状態
+    dwvApp.setTool(tool);  // dwv側のツール反映
+    if (tool === 'Draw') { // 計測ツールのとき
+      onChangeShape(tools.Draw.options[0]); // 既定: Ruler
+    } else { // それ以外
+      const lg = dwvApp.getActiveLayerGroup(); // アクティブレイヤ
+      lg?.setActiveLayer(0); // 画像レイヤに戻す
+    }
+  }, [dwvApp, onChangeShape, tools.Draw.options]); // 依存
+
+  // レイアウトリセット
+  const onReset = useCallback(() => { // リセット
+    if (dwvApp) dwvApp.resetLayout(); // 初期状態へ
+  }, [dwvApp]); // 依存
+
+  // 表示断面のトグル切替
+  const toggleOrientation = useCallback(() => { // 断面切替
+    if (!dwvApp) return; // 未初期化回避
+    // 次の断面を決定
+    const next = orientation === 'axial'
+      ? 'coronal'
+      : orientation === 'coronal'
+        ? 'sagittal'
+        : orientation === 'sagittal'
+          ? 'axial'
+          : 'coronal'; // 初回はcoronal
+    setOrientation(next); // state更新
+    // dwvのViewConfigを更新
+    dwvApp.setDataViewConfigs({ '*': [{ divId: 'layerGroup0', orientation: next }] }); // 断面適用
+    // 全データを再描画
+    for (const id of dwvApp.getDataIds()) dwvApp.render(id); // 再レンダ
+  }, [dwvApp, orientation]); // 依存
+
+  // タグダイアログの開閉
+  const handleTagsDialogOpen = useCallback(() => setShowDicomTags(true), []);  // 開く
+  const handleTagsDialogClose = useCallback(() => setShowDicomTags(false), []); // 閉じる
+
+  // ドラッグイベントの既定処理
+  const defaultHandleDragEvent = useCallback((event) => { // 既定抑止
+    event.stopPropagation(); // 伝播停止
+    event.preventDefault();  // 既定動作停止
+  }, []); // 依存なし
+
+  // ドロップ領域：dragover
+  const onBoxDragOver = useCallback((event) => { // dragover
+    defaultHandleDragEvent(event); // 既定抑止
+    const box = document.getElementById(dropboxDivId); // 要素取得
+    if (box && box.className.indexOf(hoverClassName) === -1) {
+      box.className += ' ' + hoverClassName; // ホバー見た目付与
+    }
+  }, [defaultHandleDragEvent]); // 依存
+
+  // ドロップ領域：dragleave
+  const onBoxDragLeave = useCallback((event) => { // dragleave
+    defaultHandleDragEvent(event); // 既定抑止
+    const box = document.getElementById(dropboxDivId); // 要素取得
+    if (box && box.className.indexOf(hoverClassName) !== -1) {
+      box.className = box.className.replace(' ' + hoverClassName, ''); // 見た目解除
+    }
+  }, [defaultHandleDragEvent]); // 依存
+
+  // ドロップ処理
+  const onDrop = useCallback((event) => { // drop
+    defaultHandleDragEvent(event); // 既定抑止
+    if (dwvApp) dwvApp.loadFiles(event.dataTransfer.files); // ファイル群読み込み
+  }, [defaultHandleDragEvent, dwvApp]); // 依存
+
+  // input[file] のchange処理（フォルダまたは複数ファイル）
+  const onInputFile = useCallback((event) => { // ファイル選択
+    if (!(event.target && event.target.files)) return; // ガード
+    const files = Array.from(event.target.files); // 配列化
+    const map = {}; // フォルダ→ファイル配列
+    for (const file of files) { // 全ファイル走査
+      const rel = file.webkitRelativePath || file.name; // 相対/ファイル名
+      const folder = rel.indexOf('/') !== -1 ? rel.split('/')[0] : '(root)'; // 先頭フォルダ
+      if (!map[folder]) map[folder] = []; // 初期化
+      map[folder].push(file); // 追加
+    }
+    const list = Object.keys(map).sort(); // フォルダ名一覧
+    const first = list[0] || null; // 先頭を選択
+    setFolderMap(map);        // map保存
+    setFolderList(list);      // 一覧保存
+    setSelectedFolder(first); // 選択保存
+    setDataLoaded(false);     // ロード中へ
+    setLoadProgress(0);       // 進捗リセット
+    if (!dwvApp) return;      // ガード
+    dwvApp.resetLayout();     // レイアウト初期化
+    if (first) {              // フォルダ指定あり
+      dwvApp.loadFiles(map[first]); // 選択フォルダを読み込む
+    } else if (files.length) { // 単発ファイル
+      dwvApp.loadFiles(files); // まとめて読み込む
+    }
+  }, [dwvApp]); // 依存
+
+  // フォルダ切替時のロード
+  const onSelectFolder = useCallback((folder) => { // フォルダ選択
+    if (!folder || !folderMap || !dwvApp) return; // ガード
+    setSelectedFolder(folder);  // 選択更新
+    setDataLoaded(false);       // ロード中へ
+    setLoadProgress(0);         // 進捗リセット
+    dwvApp.resetLayout();       // レイアウト初期化
+    dwvApp.loadFiles(folderMap[folder]); // 該当フォルダ読込
+  }, [dwvApp, folderMap]); // 依存
+
+  // ドロップボックスの表示/非表示とイベント付替え
+  const showDropbox = useCallback((app, show) => { // 表示切替
+    const box = document.getElementById(dropboxDivId); // ドロップ領域
+    if (!box) return; // 要素未生成ガード
+    const layerDiv = document.getElementById('layerGroup0'); // レイヤ領域
+
+    if (show) { // 表示する場合
+      box.className = `${dropboxClassName} ${borderClassName}`; // 枠線適用
+      box.style.display = 'initial'; // 表示
+      if (layerDiv) { // レイヤ側のD&Dを無効化
+        layerDiv.removeEventListener('dragover', defaultHandleDragEvent);
+        layerDiv.removeEventListener('dragleave', defaultHandleDragEvent);
+        layerDiv.removeEventListener('drop', onDrop);
       }
-    };
-    const toolsButtons = Object.keys(tools).map( (tool) => {
-      return (
-        <ToggleButton value={tool} key={tool} title={tool}
-          disabled={!dataLoaded || !this.canRunTool(tool)}>
-          { this.getToolIcon(tool) }
-        </ToggleButton>
-      );
+      // ドロップボックスにD&Dイベントを付与
+      box.addEventListener('dragover', onBoxDragOver);
+      box.addEventListener('dragleave', onBoxDragLeave);
+      box.addEventListener('drop', onDrop);
+    } else { // 非表示にする場合
+      box.className = dropboxClassName; // 枠線解除
+      box.innerHTML = '';               // 表示文言は不要なので消去
+      box.style.display = 'none';       // 非表示
+      // ボックス側からイベントを外す
+      box.removeEventListener('dragover', onBoxDragOver);
+      box.removeEventListener('dragleave', onBoxDragLeave);
+      box.removeEventListener('drop', onDrop);
+      // レイヤ側でD&Dを受け付ける
+      if (layerDiv) {
+        layerDiv.addEventListener('dragover', defaultHandleDragEvent);
+        layerDiv.addEventListener('dragleave', defaultHandleDragEvent);
+        layerDiv.addEventListener('drop', onDrop);
+      }
+    }
+  }, [defaultHandleDragEvent, onBoxDragLeave, onBoxDragOver, onDrop]); // 依存
+
+  // 初回マウント時にdwvアプリを初期化
+  useEffect(() => { // componentDidMount相当
+    const app = new App(); // dwvのApp生成
+
+    // 描画先と有効ツールを指定して初期化
+    app.init({ dataViewConfigs: { '*': [{ divId: 'layerGroup0' }] }, tools }); // 初期化
+
+    // 進捗・ロード関連のローカル変数（イベント間で共有）
+    let nLoadItem = 0;              // 読み込んだアイテム数
+    let nReceivedLoadError = 0;     // エラー数
+    let nReceivedLoadAbort = 0;     // 中断数
+    let isFirstRender = true;       // 初回描画フラグ
+
+    // ロード開始
+    app.addEventListener('loadstart', () => { // ロード開始
+      nLoadItem = 0; nReceivedLoadError = 0; nReceivedLoadAbort = 0; isFirstRender = true; // 変数リセット
+      showDropbox(app, false); // ドロップボックスを隠す
     });
 
-    return (
-      <Root className={classes.root} id="dwv">
-        <LinearProgress variant="determinate" value={loadProgress} />
-        <Stack direction="row" spacing={1} padding={1}
-          justifyContent="center" flexWrap="wrap">
-          <ToggleButtonGroup size="small"
-            color="primary"
-            value={ this.state.selectedTool }
-            exclusive
-            onChange={handleToolChange}
-          >
-            {toolsButtons}
-          </ToggleButtonGroup>
+    // 進捗イベント
+    app.addEventListener('loadprogress', (e) => setLoadProgress(e.loaded)); // 0-100%
 
-          <ToggleButton size="small"
-            value="reset"
-            title="Reset"
-            disabled={!dataLoaded}
-            onChange={this.onReset}
-          ><RefreshIcon /></ToggleButton>
+    // 描画完了（各データ初回）
+    app.addEventListener('renderend', (event) => { // レンダ終了
+      if (!isFirstRender) return; // 初回のみ
+      isFirstRender = false;      // 初回処理を終えた
+      const vl = app.getViewLayersByDataId(event.dataid)[0]; // ViewLayer取得
+      const vc = vl.getViewController(); // ビューコントローラ
+      if (vc.canScroll()) setCanScroll(true); // スクロール可否を反映
+      if (vc.isMonochrome()) setCanWindowLevel(true); // WL可否を反映
+      // 既定ツールを決定（スクロール可能ならScroll、なければZoomAndPan）
+      const initial = vc.canScroll() ? 'Scroll' : 'ZoomAndPan'; // 初期ツール
+      setSelectedTool(initial); // UI更新
+      app.setTool(initial);     // dwv側も切替
+    });
 
-          <ToggleButton size="small"
-            value="toggleOrientation"
-            title="Toggle Orientation"
-            disabled={!dataLoaded}
-            onClick={this.toggleOrientation}
-          ><CameraswitchIcon /></ToggleButton>
+    // ロード完了
+    app.addEventListener('load', (event) => { // ロード完了
+      setMetaData(app.getMetaData(event.dataid)); // メタデータ保存
+      setLoadProgress(100);  // 進捗を完了へ
+      setDataLoaded(true);   // ボタンを有効化
+    });
 
-          <ToggleButton size="small"
-            value="tags"
-            title="Tags"
-            disabled={!dataLoaded}
-            onClick={this.handleTagsDialogOpen}
-          ><LibraryBooksIcon /></ToggleButton>
+    // ロード終了（成功/失敗とも）
+    app.addEventListener('loadend', () => { // ロード終了
+      if (nReceivedLoadError) { // エラーがあれば
+        setLoadProgress(0); alert('Received errors during load. Check log for details.'); // 通知
+        if (!nLoadItem) showDropbox(app, true); // 何も読めてなければドロップを再表示
+      }
+      if (nReceivedLoadAbort) { // 中断時
+        setLoadProgress(0); alert('Load was aborted.'); // 通知
+        showDropbox(app, true); // ドロップを再表示
+      }
+    });
 
-          <Dialog
-            open={this.state.showDicomTags}
-            onClose={this.handleTagsDialogClose}
-            slots={{ transition: TransitionUp }}
-            >
-              <AppBar className={classes.appBar} position="sticky">
-                <Toolbar>
-                  <IconButton color="inherit" onClick={this.handleTagsDialogClose} aria-label="Close">
-                    <CloseIcon />
-                  </IconButton>
-                  <Typography variant="h6" color="inherit" className={classes.flex}>
-                    DICOM Tags
-                  </Typography>
-                </Toolbar>
-              </AppBar>
-              <TagsTable data={metaData} />
-          </Dialog>
+    // アイテム読込
+    app.addEventListener('loaditem', () => { nLoadItem += 1; }); // カウント加算
+    // エラー
+    app.addEventListener('loaderror', (ev) => { console.error(ev.error); nReceivedLoadError += 1; }); // ログ
+    // 中断
+    app.addEventListener('loadabort', () => { nReceivedLoadAbort += 1; }); // 加算
+
+    // キーボードとリサイズ
+    app.addEventListener('keydown', (ev) => app.defaultOnKeydown(ev)); // 既定キー操作
+    window.addEventListener('resize', app.onResize); // リサイズ対応
+
+    // stateへ保存
+    setDwvApp(app); // 他のハンドラで参照できるように保存
+
+    // 初期はドロップボックスを表示（何もないときの案内）
+    showDropbox(app, true); // D&D案内を見せる
+
+    // URLパラメータからのロード（あれば）
+    app.loadFromUri(window.location.href); // ?input=... 等
+
+    // アンマウント時のクリーンアップ
+    return () => { // componentWillUnmount
+      showDropbox(app, false); // イベントを外す
+      window.removeEventListener('resize', app.onResize); // リスナ解除
+      // dwvのイベントは都度捨てるだけでOK（Appインスタンス破棄で解放）
+    };
+  }, [showDropbox, tools]); // 一度だけ（toolsは固定）
+
+  // ツールボタン群をメモ化
+  const toolsButtons = useMemo(() => ( // ツール→トグルボタン
+    Object.keys(tools).map((tool) => ( // 各ツールでボタン作成
+      <ToggleButton
+        value={tool} key={tool} title={tool} // 値/キー/ツールチップ
+        disabled={!dataLoaded || !canRunTool(tool)} // ロード前/不可ツールは無効
+      >
+        {getToolIcon(tool)} {/* 見た目用アイコン */}
+      </ToggleButton>
+    ))
+  ), [tools, dataLoaded, canRunTool, getToolIcon]); // 依存
+
+  // トグルグループ変更（選択ツールをdwvへ反映）
+  const handleToolGroupChange = useCallback((e, newTool) => { // グループ変更
+    if (newTool) onChangeTool(newTool); // 値があれば確定
+  }, [onChangeTool]); // 依存
+
+  // フォルダ選択ボタンのクリック（webkitdirectory有効）
+  const clickSelectFolder = useCallback(() => { // フォルダ選択
+    const input = inputRef.current; // 参照取得
+    if (!input) return; // ガード
+    input.webkitdirectory = true;  // ディレクトリ選択を有効化
+    input.click();                 // ダイアログを開く
+  }, []); // 依存なし
+
+  // 単ファイル選択ボタンのクリック
+  const clickSelectFiles = useCallback(() => { // ファイル選択
+    const input = inputRef.current; // 参照
+    if (!input) return; // ガード
+    input.webkitdirectory = false; // 単ファイル選択に切替
+    input.click();                 // ダイアログを開く
+    setTimeout(() => { if (input) input.webkitdirectory = true; }, 0); // すぐ戻す
+  }, []); // 依存なし
+
+  // JSXの返却（UI）
+  return (
+    <Root className={classes.root} id="dwv">{/* ルート要素 */}
+      <input
+        id="input-file" // DOMで参照するid
+        ref={inputRef}  // 制御用ref
+        type="file"     // ファイル入力
+        multiple        // 複数選択
+        style={{ display: 'none' }} // 隠してボタンから起動
+        onChange={onInputFile}      // 変更時の処理
+      />
+      <LinearProgress variant="determinate" value={loadProgress} />{/* 進捗バー */}
+      <Stack direction="row" spacing={1} padding={1} justifyContent="center" flexWrap="wrap">
+        <Alert severity="info" sx={{ width: '100%' }}>
+          画像を読み込むには「フォルダを選択」ボタン、または下の領域にドラッグ＆ドロップしてください。
+        </Alert>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title="フォルダ内の画像をまとめて読み込み">
+            <Button size="small" variant="contained" startIcon={<FolderOpenIcon />} onClick={clickSelectFolder}>
+              フォルダを選択
+            </Button>
+          </Tooltip>
+          <Tooltip title="ファイルを個別に選択して読み込み">
+            <Button size="small" variant="outlined" startIcon={<UploadFileIcon />} onClick={clickSelectFiles}>
+              ファイルを選択
+            </Button>
+          </Tooltip>
+          {folderList && folderList.length > 0 && (<Chip label={`${folderList.length} フォルダ`} size="small" />)}
         </Stack>
 
-        <div id="layerGroup0" className="layerGroup">
-          <div id="dropBox"></div>
-        </div>
+        <ToggleButtonGroup
+          size="small" color="primary" value={selectedTool} exclusive onChange={handleToolGroupChange}
+        >
+          {toolsButtons}{/* ツールボタン群 */}
+        </ToggleButtonGroup>
 
-        <div><p className="legend">
-          <Typography variant="caption">Powered by <Link
-              href="https://github.com/ivmartel/dwv"
-              title="dwv on github"
-              color="inherit">dwv
-            </Link> {versions.dwv} and <Link
-              href="https://github.com/facebook/react"
-              title="react on github"
-              color="inherit">React
-            </Link> {versions.react}
-          </Typography>
-        </p></div>
+        {folderList && folderList.length > 0 && ( // フォルダ切替UI
+          <ToggleButtonGroup
+            size="small" color="secondary" value={selectedFolder} exclusive
+            onChange={(e, f) => { if (f) onSelectFolder(f); }}
+          >
+            {folderList.map((folder) => ( // 各フォルダをボタン化
+              <ToggleButton key={folder} value={folder} title={folder}>{folder}</ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        )}
 
-      </Root>
-    );
-  }
+        <ToggleButton size="small" value="reset" title="Reset" disabled={!dataLoaded} onChange={onReset}>
+          <RefreshIcon />
+        </ToggleButton>
 
-  componentDidMount() {
-    // create app
-    const app = new App();
-    // initialise app
-    app.init({
-      "dataViewConfigs": {'*': [{divId: 'layerGroup0'}]},
-      "tools": this.state.tools
-    });
+        <ToggleButton size="small" value="toggleOrientation" title="Toggle Orientation" disabled={!dataLoaded} onClick={toggleOrientation}>
+          <CameraswitchIcon />
+        </ToggleButton>
 
-    // load events
-    let nLoadItem = null;
-    let nReceivedLoadError = null;
-    let nReceivedLoadAbort = null;
-    let isFirstRender = null;
-    app.addEventListener('loadstart', (/*event*/) => {
-      // reset flags
-      nLoadItem = 0;
-      nReceivedLoadError = 0;
-      nReceivedLoadAbort = 0;
-      isFirstRender = true;
-      // hide drop box
-      this.showDropbox(app, false);
-    });
-    app.addEventListener("loadprogress", (event) => {
-      this.setState({loadProgress: event.loaded});
-    });
-    app.addEventListener('renderend', (event) => {
-      if (isFirstRender) {
-        isFirstRender = false;
-        const vl = this.state.dwvApp.getViewLayersByDataId(event.dataid)[0];
-        const vc = vl.getViewController();
-        // available tools
-        if (vc.canScroll()) {
-          this.setState({canScroll: true});
-        }
-        if (vc.isMonochrome()) {
-          this.setState({canWindowLevel: true});
-        }
-        // selected tool
-        let selectedTool = 'ZoomAndPan';
-        if (vc.canScroll()) {
-          selectedTool = 'Scroll';
-        }
-        this.onChangeTool(selectedTool);
-      }
-    });
-    app.addEventListener("load", (event) => {
-      // set dicom tags
-      this.setState({metaData: app.getMetaData(event.dataid)});
-      // force progress
-      this.setState({loadProgress: 100});
-      // set data loaded flag
-      this.setState({dataLoaded: true});
-    });
-    app.addEventListener('loadend', (/*event*/) => {
-      if (nReceivedLoadError) {
-        this.setState({loadProgress: 0});
-        alert('Received errors during load. Check log for details.');
-        // show drop box if nothing has been loaded
-        if (!nLoadItem) {
-          this.showDropbox(app, true);
-        }
-      }
-      if (nReceivedLoadAbort) {
-        this.setState({loadProgress: 0});
-        alert('Load was aborted.');
-        this.showDropbox(app, true);
-      }
-    });
-    app.addEventListener('loaditem', (/*event*/) => {
-      ++nLoadItem;
-    });
-    app.addEventListener('loaderror', (event) => {
-      console.error(event.error);
-      ++nReceivedLoadError;
-    });
-    app.addEventListener('loadabort', (/*event*/) => {
-      ++nReceivedLoadAbort;
-    });
+        <ToggleButton size="small" value="tags" title="Tags" disabled={!dataLoaded} onClick={handleTagsDialogOpen}>
+          <LibraryBooksIcon />
+        </ToggleButton>
 
-    // handle key events
-    app.addEventListener('keydown', (event) => {
-      app.defaultOnKeydown(event);
-    });
-    // handle window resize
-    window.addEventListener('resize', app.onResize);
+        <Dialog
+          open={showDicomTags} onClose={handleTagsDialogClose} slots={{ transition: TransitionUp }}
+        >
+          <AppBar className={classes.appBar} position="sticky">
+            <Toolbar>
+              <IconButton color="inherit" onClick={handleTagsDialogClose} aria-label="Close"><CloseIcon /></IconButton>
+              <Typography variant="h6" color="inherit" className={classes.flex}>DICOM Tags</Typography>
+            </Toolbar>
+          </AppBar>
+          <TagsTable data={metaData} />{/* メタデータテーブル */}
+        </Dialog>
+      </Stack>
 
-    // store
-    this.setState({dwvApp: app});
+      <div id="layerGroup0" className="layerGroup">{/* dwvが描画する領域 */}
+        <div id="dropBox">{/* ドロップ領域（案内テキストはJSで不要化） */}</div>
+      </div>
+    </Root>
+  );
+};
 
-    // setup drop box
-    this.setupDropbox(app);
-
-    // possible load from location
-    app.loadFromUri(window.location.href);
-  }
-
-  /**
-   * Get the icon of a tool.
-   *
-   * @param {string} tool The tool name.
-   * @returns {Icon} The associated icon.
-   */
-  getToolIcon = (tool) => {
-    let res;
-    if (tool === 'Scroll') {
-      res = (<MenuIcon />);
-    } else if (tool === 'ZoomAndPan') {
-      res = (<SearchIcon />);
-    } else if (tool === 'WindowLevel') {
-      res = (<ContrastIcon />);
-    } else if (tool === 'Draw') {
-      res = (<StraightenIcon />);
-    }
-    return res;
-  }
-
-  /**
-   * Handle a change tool event.
-   * @param {string} tool The new tool name.
-   */
-  onChangeTool = (tool) => {
-    if (this.state.dwvApp) {
-      this.setState({selectedTool: tool});
-      this.state.dwvApp.setTool(tool);
-      if (tool === 'Draw') {
-        this.onChangeShape(this.state.tools.Draw.options[0]);
-      } else {
-        // if draw was created, active is now a draw layer...
-        // reset to view layer
-        const lg = this.state.dwvApp.getActiveLayerGroup();
-        lg?.setActiveLayer(0);
-      }
-    }
-  }
-
-  /**
-   * Check if a tool can be run.
-   *
-   * @param {string} tool The tool name.
-   * @returns {boolean} True if the tool can be run.
-   */
-  canRunTool = (tool) => {
-    let res;
-    if (tool === 'Scroll') {
-      res = this.state.canScroll;
-    } else if (tool === 'WindowLevel') {
-      res = this.state.canWindowLevel;
-    } else {
-      res = true;
-    }
-    return res;
-  }
-
-  /**
-   * Toogle the viewer orientation.
-   */
-  toggleOrientation = () => {
-    if (typeof this.state.orientation !== 'undefined') {
-      if (this.state.orientation === 'axial') {
-        this.state.orientation = 'coronal';
-      } else if (this.state.orientation === 'coronal') {
-        this.state.orientation = 'sagittal';
-      } else if (this.state.orientation === 'sagittal') {
-        this.state.orientation = 'axial';
-      }
-    } else {
-      // default is most probably axial
-      this.state.orientation = 'coronal';
-    }
-    // update data view config
-    const config = {
-      '*': [
-        {
-          divId: 'layerGroup0',
-          orientation: this.state.orientation
-        }
-      ]
-    };
-    this.state.dwvApp.setDataViewConfigs(config);
-    // render data
-    const dataIds = this.state.dwvApp.getDataIds();
-    for (const dataId of dataIds) {
-      this.state.dwvApp.render(dataId);
-    }
-  }
-
-  /**
-   * Handle a change draw shape event.
-   * @param {string} shape The new shape name.
-   */
-  onChangeShape = (shape) => {
-    if (this.state.dwvApp) {
-      this.state.dwvApp.setToolFeatures({shapeName: shape});
-    }
-  }
-
-  /**
-   * Handle a reset event.
-   */
-  onReset = () => {
-    if (this.state.dwvApp) {
-      this.state.dwvApp.resetLayout();
-    }
-  }
-
-  /**
-   * Open the DICOM tags dialog.
-   */
-  handleTagsDialogOpen = () => {
-    this.setState({ showDicomTags: true });
-  }
-
-  /**
-   * Close the DICOM tags dialog.
-   */
-  handleTagsDialogClose = () => {
-    this.setState({ showDicomTags: false });
-  };
-
-  // drag and drop [begin] -----------------------------------------------------
-
-  /**
-   * Setup the data load drop box: add event listeners and set initial size.
-   */
-  setupDropbox = (app) => {
-    this.showDropbox(app, true);
-  }
-
-  /**
-   * Default drag event handling.
-   * @param {DragEvent} event The event to handle.
-   */
-  defaultHandleDragEvent = (event) => {
-    // prevent default handling
-    event.stopPropagation();
-    event.preventDefault();
-  }
-
-  /**
-   * Handle a drag over.
-   * @param {DragEvent} event The event to handle.
-   */
-  onBoxDragOver = (event) => {
-    this.defaultHandleDragEvent(event);
-    // update box border
-    const box = document.getElementById(this.state.dropboxDivId);
-    if (box && box.className.indexOf(this.state.hoverClassName) === -1) {
-        box.className += ' ' + this.state.hoverClassName;
-    }
-  }
-
-  /**
-   * Handle a drag leave.
-   * @param {DragEvent} event The event to handle.
-   */
-  onBoxDragLeave = (event) => {
-    this.defaultHandleDragEvent(event);
-    // update box class
-    const box = document.getElementById(this.state.dropboxDivId);
-    if (box && box.className.indexOf(this.state.hoverClassName) !== -1) {
-        box.className = box.className.replace(' ' + this.state.hoverClassName, '');
-    }
-  }
-
-  /**
-   * Handle a drop event.
-   * @param {DragEvent} event The event to handle.
-   */
-  onDrop = (event) => {
-    this.defaultHandleDragEvent(event);
-    // load files
-    this.state.dwvApp.loadFiles(event.dataTransfer.files);
-  }
-
-  /**
-   * Handle a an input[type:file] change event.
-   * @param event The event to handle.
-   */
-  onInputFile = (event) => {
-    if (event.target && event.target.files) {
-      this.state.dwvApp.loadFiles(event.target.files);
-    }
-  }
-
-  /**
-   * Show/hide the data load drop box.
-   * @param show True to show the drop box.
-   */
-  showDropbox = (app, show) => {
-    const box = document.getElementById(this.state.dropboxDivId);
-    if (!box) {
-      return;
-    }
-    const layerDiv = document.getElementById('layerGroup0');
-
-    if (show) {
-      // reset css class
-      box.className = this.state.dropboxClassName + ' ' + this.state.borderClassName;
-      // check content
-      if (box.innerHTML === '') {
-        const p = document.createElement('p');
-        p.appendChild(document.createTextNode('Drag and drop data here or '));
-        // input file
-        const input = document.createElement('input');
-        input.onchange = this.onInputFile;
-        input.type = 'file';
-        input.multiple = true;
-        input.id = 'input-file';
-        input.style.display = 'none';
-        const label = document.createElement('label');
-        label.htmlFor = 'input-file';
-        const link = document.createElement('a');
-        link.appendChild(document.createTextNode('click here'));
-        link.id = 'input-file-link';
-        label.appendChild(link);
-        p.appendChild(input);
-        p.appendChild(label);
-
-        box.appendChild(p);
-      }
-      // show box
-      box.setAttribute('style', 'display:initial');
-      // stop layer listening
-      if (layerDiv) {
-        layerDiv.removeEventListener('dragover', this.defaultHandleDragEvent);
-        layerDiv.removeEventListener('dragleave', this.defaultHandleDragEvent);
-        layerDiv.removeEventListener('drop', this.onDrop);
-      }
-      // listen to box events
-      box.addEventListener('dragover', this.onBoxDragOver);
-      box.addEventListener('dragleave', this.onBoxDragLeave);
-      box.addEventListener('drop', this.onDrop);
-    } else {
-      // remove border css class
-      box.className = this.state.dropboxClassName;
-      // remove content
-      box.innerHTML = '';
-      // hide box
-      box.setAttribute('style', 'display:none');
-      // stop box listening
-      box.removeEventListener('dragover', this.onBoxDragOver);
-      box.removeEventListener('dragleave', this.onBoxDragLeave);
-      box.removeEventListener('drop', this.onDrop);
-      // listen to layer events
-      if (layerDiv) {
-        layerDiv.addEventListener('dragover', this.defaultHandleDragEvent);
-        layerDiv.addEventListener('dragleave', this.defaultHandleDragEvent);
-        layerDiv.addEventListener('drop', this.onDrop);
-      }
-    }
-  }
-
-  // drag and drop [end] -------------------------------------------------------
-
-} // DwvComponent
-
-export default (DwvComponent);
+// 既定エクスポート
+export default DwvComponent; // 関数コンポーネントを公開
