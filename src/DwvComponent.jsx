@@ -1,7 +1,17 @@
 // MUIのコンポーネントをインポート
 import {
-  Alert, AppBar, Button, Chip, Dialog, IconButton, LinearProgress,
-  Slide, Stack, ToggleButton, ToggleButtonGroup, Toolbar, Tooltip, Typography
+  AppBar,
+  Box,
+  Button,
+  Dialog,
+  Divider,
+  Grid,
+  IconButton, LinearProgress,
+  List, ListItem,
+  ListItemText,
+  Paper,
+  Slide,
+  ToggleButton, ToggleButtonGroup, Toolbar, Tooltip, Typography
 } from '@mui/material'; // UI部品一式
 import { styled } from '@mui/material/styles'; // スタイルユーティリティ
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'; // Reactのフック群
@@ -17,8 +27,10 @@ import CameraswitchIcon from '@mui/icons-material/Cameraswitch'; // 断面切替
 import CloseIcon from '@mui/icons-material/Close'; // 閉じる
 import ContrastIcon from '@mui/icons-material/Contrast'; // WL/WW
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'; // フォルダ選択
+import InvertColorsOffIcon from '@mui/icons-material/InvertColorsOff'; // グレースケール
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks'; // タグ表示
 import MenuIcon from '@mui/icons-material/Menu'; // スクロール
+import PaletteIcon from '@mui/icons-material/Palette'; // カラー
 import RefreshIcon from '@mui/icons-material/Refresh'; // リセット
 import SearchIcon from '@mui/icons-material/Search'; // ズーム/パン
 import StraightenIcon from '@mui/icons-material/Straighten'; // 物差し(計測)
@@ -40,7 +52,8 @@ const classes = {
 const Root = styled('div')(({ theme }) => ({ // ルート用スタイル
   [`& .${classes.appBar}`]: { position: 'relative' }, // AppBarの位置
   [`& .${classes.title}`]: { flex: '0 0 auto' },      // タイトルの伸縮
-  [`& .${classes.iconSmall}`]: { fontSize: 20 }       // 小アイコンサイズ
+  [`& .${classes.iconSmall}`]: { fontSize: 20 },       // 小アイコンサイズ
+  flexDirection:'column',
 }));
 
 // ダイアログの表示遷移（下から上へスライド）
@@ -79,11 +92,8 @@ const DwvComponent = () => { // ビューワ本体
   const [orientation, setOrientation] = useState(undefined); // axial/coronal/sagittal
   const [showDicomTags, setShowDicomTags] = useState(false); // タグダイアログ
 
-  // ドロップボックス関連のDOM id/クラス（定数）
-  const dropboxDivId = 'dropBox';              // ドロップ領域のid
-  const dropboxClassName = 'dropBox';          // 基本クラス
-  const borderClassName = 'dropBoxBorder';     // 枠線クラス
-  const hoverClassName = 'hover';              // ホバー時クラス
+  // カラーマップ（表示モード）
+  const [colorMap, setColorMap] = useState('grayscale'); // 既定は白黒
 
   // フォルダ読み込み用の状態
   const [folderMap, setFolderMap] = useState(null); // { folderName: File[] }
@@ -101,6 +111,15 @@ const DwvComponent = () => { // ビューワ本体
     if (tool === 'Draw') return (<StraightenIcon />);     // 計測
     return null; // 未定義ツール
   }, []); // 依存なし
+
+  // ツールの説明（ホバー表示用）
+  const getToolTooltip = useCallback((tool) => {
+    if (tool === 'Scroll') return 'スクロール: マウス/ホイールでスライス移動';
+    if (tool === 'ZoomAndPan') return 'ズーム/パン: ドラッグで移動、ホイール/ピンチで拡大縮小';
+    if (tool === 'WindowLevel') return 'ウィンドウレベル/幅: ドラッグでコントラスト調整';
+    if (tool === 'Draw') return '計測(物差し): 2点間の距離を測定';
+    return tool;
+  }, []);
 
   // ツールの実行可否を判定
   const canRunTool = useCallback((tool) => { // 実行可能か
@@ -154,35 +173,26 @@ const DwvComponent = () => { // ビューワ本体
   const handleTagsDialogOpen = useCallback(() => setShowDicomTags(true), []);  // 開く
   const handleTagsDialogClose = useCallback(() => setShowDicomTags(false), []); // 閉じる
 
-  // ドラッグイベントの既定処理
-  const defaultHandleDragEvent = useCallback((event) => { // 既定抑止
-    event.stopPropagation(); // 伝播停止
-    event.preventDefault();  // 既定動作停止
-  }, []); // 依存なし
+  // カラーマップ適用（CSSフィルタで視覚的に切替）
+  const applyColorMapCss = useCallback((mode) => {
+    const canvases = document.querySelectorAll('#layerGroup0 canvas');
+    canvases.forEach((canvas) => {
+      canvas.style.filter = mode === 'grayscale' ? 'grayscale(1)' : 'none';
+    });
+  }, []);
 
-  // ドロップ領域：dragover
-  const onBoxDragOver = useCallback((event) => { // dragover
-    defaultHandleDragEvent(event); // 既定抑止
-    const box = document.getElementById(dropboxDivId); // 要素取得
-    if (box && box.className.indexOf(hoverClassName) === -1) {
-      box.className += ' ' + hoverClassName; // ホバー見た目付与
-    }
-  }, [defaultHandleDragEvent]); // 依存
+  const onChangeColorMap = useCallback((e, mode) => {
+    if (!mode) return;
+    setColorMap(mode);
+    applyColorMapCss(mode);
+  }, [applyColorMapCss]);
 
-  // ドロップ領域：dragleave
-  const onBoxDragLeave = useCallback((event) => { // dragleave
-    defaultHandleDragEvent(event); // 既定抑止
-    const box = document.getElementById(dropboxDivId); // 要素取得
-    if (box && box.className.indexOf(hoverClassName) !== -1) {
-      box.className = box.className.replace(' ' + hoverClassName, ''); // 見た目解除
-    }
-  }, [defaultHandleDragEvent]); // 依存
+  // カラーマップの再適用（データ読み込み直後や切替時に確実に反映）
+  useEffect(() => {
+    applyColorMapCss(colorMap);
+  }, [colorMap, dataLoaded, applyColorMapCss]);
 
-  // ドロップ処理
-  const onDrop = useCallback((event) => { // drop
-    defaultHandleDragEvent(event); // 既定抑止
-    if (dwvApp) dwvApp.loadFiles(event.dataTransfer.files); // ファイル群読み込み
-  }, [defaultHandleDragEvent, dwvApp]); // 依存
+  // D&D機能は撤去
 
   // input[file] のchange処理（フォルダまたは複数ファイル）
   const onInputFile = useCallback((event) => { // ファイル選択
@@ -217,44 +227,11 @@ const DwvComponent = () => { // ビューワ本体
     setSelectedFolder(folder);  // 選択更新
     setDataLoaded(false);       // ロード中へ
     setLoadProgress(0);         // 進捗リセット
-    dwvApp.resetLayout();       // レイアウト初期化
+    // dwvApp.resetLayout();       // レイアウト初期化
     dwvApp.loadFiles(folderMap[folder]); // 該当フォルダ読込
   }, [dwvApp, folderMap]); // 依存
 
-  // ドロップボックスの表示/非表示とイベント付替え
-  const showDropbox = useCallback((app, show) => { // 表示切替
-    const box = document.getElementById(dropboxDivId); // ドロップ領域
-    if (!box) return; // 要素未生成ガード
-    const layerDiv = document.getElementById('layerGroup0'); // レイヤ領域
-
-    if (show) { // 表示する場合
-      box.className = `${dropboxClassName} ${borderClassName}`; // 枠線適用
-      box.style.display = 'initial'; // 表示
-      if (layerDiv) { // レイヤ側のD&Dを無効化
-        layerDiv.removeEventListener('dragover', defaultHandleDragEvent);
-        layerDiv.removeEventListener('dragleave', defaultHandleDragEvent);
-        layerDiv.removeEventListener('drop', onDrop);
-      }
-      // ドロップボックスにD&Dイベントを付与
-      box.addEventListener('dragover', onBoxDragOver);
-      box.addEventListener('dragleave', onBoxDragLeave);
-      box.addEventListener('drop', onDrop);
-    } else { // 非表示にする場合
-      box.className = dropboxClassName; // 枠線解除
-      box.innerHTML = '';               // 表示文言は不要なので消去
-      box.style.display = 'none';       // 非表示
-      // ボックス側からイベントを外す
-      box.removeEventListener('dragover', onBoxDragOver);
-      box.removeEventListener('dragleave', onBoxDragLeave);
-      box.removeEventListener('drop', onDrop);
-      // レイヤ側でD&Dを受け付ける
-      if (layerDiv) {
-        layerDiv.addEventListener('dragover', defaultHandleDragEvent);
-        layerDiv.addEventListener('dragleave', defaultHandleDragEvent);
-        layerDiv.addEventListener('drop', onDrop);
-      }
-    }
-  }, [defaultHandleDragEvent, onBoxDragLeave, onBoxDragOver, onDrop]); // 依存
+  // showDropbox などのD&D制御は撤去
 
   // 初回マウント時にdwvアプリを初期化
   useEffect(() => { // componentDidMount相当
@@ -272,7 +249,6 @@ const DwvComponent = () => { // ビューワ本体
     // ロード開始
     app.addEventListener('loadstart', () => { // ロード開始
       nLoadItem = 0; nReceivedLoadError = 0; nReceivedLoadAbort = 0; isFirstRender = true; // 変数リセット
-      showDropbox(app, false); // ドロップボックスを隠す
     });
 
     // 進捗イベント
@@ -290,6 +266,9 @@ const DwvComponent = () => { // ビューワ本体
       const initial = vc.canScroll() ? 'Scroll' : 'ZoomAndPan'; // 初期ツール
       setSelectedTool(initial); // UI更新
       app.setTool(initial);     // dwv側も切替
+      // 初回描画時にレイアウトをフィット（ズーム・センタリングを適正化）
+      app.resetLayout();
+      // カラーマップは state 監視の useEffect で適用する
     });
 
     // ロード完了
@@ -303,11 +282,9 @@ const DwvComponent = () => { // ビューワ本体
     app.addEventListener('loadend', () => { // ロード終了
       if (nReceivedLoadError) { // エラーがあれば
         setLoadProgress(0); alert('Received errors during load. Check log for details.'); // 通知
-        if (!nLoadItem) showDropbox(app, true); // 何も読めてなければドロップを再表示
       }
       if (nReceivedLoadAbort) { // 中断時
         setLoadProgress(0); alert('Load was aborted.'); // 通知
-        showDropbox(app, true); // ドロップを再表示
       }
     });
 
@@ -325,31 +302,29 @@ const DwvComponent = () => { // ビューワ本体
     // stateへ保存
     setDwvApp(app); // 他のハンドラで参照できるように保存
 
-    // 初期はドロップボックスを表示（何もないときの案内）
-    showDropbox(app, true); // D&D案内を見せる
-
     // URLパラメータからのロード（あれば）
     app.loadFromUri(window.location.href); // ?input=... 等
 
     // アンマウント時のクリーンアップ
     return () => { // componentWillUnmount
-      showDropbox(app, false); // イベントを外す
       window.removeEventListener('resize', app.onResize); // リスナ解除
       // dwvのイベントは都度捨てるだけでOK（Appインスタンス破棄で解放）
     };
-  }, [showDropbox, tools]); // 一度だけ（toolsは固定）
+  }, [tools]); // 一度だけ（toolsは固定）
 
   // ツールボタン群をメモ化
   const toolsButtons = useMemo(() => ( // ツール→トグルボタン
     Object.keys(tools).map((tool) => ( // 各ツールでボタン作成
-      <ToggleButton
-        value={tool} key={tool} title={tool} // 値/キー/ツールチップ
-        disabled={!dataLoaded || !canRunTool(tool)} // ロード前/不可ツールは無効
-      >
-        {getToolIcon(tool)} {/* 見た目用アイコン */}
-      </ToggleButton>
+      <Tooltip key={tool} title={getToolTooltip(tool)} arrow>
+        <ToggleButton
+          value={tool} // 値
+          disabled={!dataLoaded || !canRunTool(tool)} // ロード前/不可ツールは無効
+        >
+          {getToolIcon(tool)} {/* 見た目用アイコン */}
+        </ToggleButton>
+      </Tooltip>
     ))
-  ), [tools, dataLoaded, canRunTool, getToolIcon]); // 依存
+  ), [tools, dataLoaded, canRunTool, getToolIcon, getToolTooltip]); // 依存
 
   // トグルグループ変更（選択ツールをdwvへ反映）
   const handleToolGroupChange = useCallback((e, newTool) => { // グループ変更
@@ -375,7 +350,7 @@ const DwvComponent = () => { // ビューワ本体
 
   // JSXの返却（UI）
   return (
-    <Root className={classes.root} id="dwv">{/* ルート要素 */}
+    <Root id="dwv">{/* ルート要素 */}
       <input
         id="input-file" // DOMで参照するid
         ref={inputRef}  // 制御用ref
@@ -384,70 +359,120 @@ const DwvComponent = () => { // ビューワ本体
         style={{ display: 'none' }} // 隠してボタンから起動
         onChange={onInputFile}      // 変更時の処理
       />
-      <LinearProgress variant="determinate" value={loadProgress} />{/* 進捗バー */}
-      <Stack direction="row" spacing={1} padding={1} justifyContent="center" flexWrap="wrap">
-        <Alert severity="info" sx={{ width: '100%' }}>
-          画像を読み込むには「フォルダを選択」ボタン、または下の領域にドラッグ＆ドロップしてください。
-        </Alert>
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Tooltip title="フォルダ内の画像をまとめて読み込み">
-            <Button size="small" variant="contained" startIcon={<FolderOpenIcon />} onClick={clickSelectFolder}>
-              フォルダを選択
-            </Button>
-          </Tooltip>
-          <Tooltip title="ファイルを個別に選択して読み込み">
-            <Button size="small" variant="outlined" startIcon={<UploadFileIcon />} onClick={clickSelectFiles}>
-              ファイルを選択
-            </Button>
-          </Tooltip>
-          {folderList && folderList.length > 0 && (<Chip label={`${folderList.length} フォルダ`} size="small" />)}
-        </Stack>
+       <Grid container spacing={0} sx={{ flex: 1, height: '100%', overflow: 'hidden' }}>
+        <Grid size={3} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
+          <Paper sx={{ height: '100%', width: '100%' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', height: '100%' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+                <Tooltip title="フォルダ内の画像をまとめて読み込み">
+                  <Button size="small" variant="contained" startIcon={<FolderOpenIcon />} onClick={clickSelectFolder}>
+                    フォルダを選択
+                  </Button>
+                </Tooltip>
+                <Tooltip title="ファイルを個別に選択して読み込み">
+                  <Button size="small" variant="outlined" startIcon={<UploadFileIcon />} onClick={clickSelectFiles}>
+                    ファイルを選択
+                  </Button>
+                </Tooltip>
+              </Box>
+              <LinearProgress variant="determinate" value={loadProgress} />{/* 進捗バー */}
+              <List dense sx={{ width: '100%', flex: 1, overflowY: 'auto', mt: 1 }}>
+                {folderList.length === 0 && (
+                  <ListItem>
+                    <ListItemText primary="選択された項目はありません" />
+                  </ListItem>
+                )}
+                {folderList.length > 0 && (
+                  <>
+                    <ListItem sx={{ py: 0.5 }}>
+                      <ListItemText
+                        primary={`選択中フォルダ: ${selectedFolder || '(未選択)'}`}
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        onClick={() => onSelectFolder(selectedFolder)}
+                      />
+                    </ListItem>
+                    <Divider />
+                    {selectedFolder && (folderMap?.[selectedFolder]?.length || 0) > 0 && (
+                      <>
+                        <Divider sx={{ my: 0.5 }} />
+                        {folderMap[selectedFolder].map((file) => (
+                          <ListItem key={file.webkitRelativePath || file.name} sx={{ pl: 2 }}>
+                            <ListItemText
+                              primary={file.name}
+                              secondary={`${(file.size / 1024).toFixed(1)} KB`}
+                              secondaryTypographyProps={{ variant: 'caption' }}
+                            />
+                          </ListItem>
+                        ))}
+                      </>
+                    )}
+                  </>
+                )}
+              </List>
+            </Box>
+          </Paper>
+        </Grid>
+        <Grid size={9} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
+          <Paper sx={{ height: '100%', width: '100%' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+                <ToggleButtonGroup
+                  size="medium" color="primary" value={selectedTool} exclusive onChange={handleToolGroupChange}
+                >
+                  {toolsButtons}{/* ツールボタン群 */}
+                </ToggleButtonGroup>
+                <ToggleButtonGroup
+                  size="medium" color="secondary" value={colorMap} exclusive onChange={onChangeColorMap}
+                  sx={{ ml: 1 }}
+                >
+                  <Tooltip title="カラー表示: 擬似カラーを適用" arrow>
+                    <ToggleButton value="color">
+                      <PaletteIcon />
+                    </ToggleButton>
+                  </Tooltip>
+                  <Tooltip title="グレースケール: 白黒表示に切り替え" arrow>
+                    <ToggleButton value="grayscale">
+                      <InvertColorsOffIcon />
+                    </ToggleButton>
+                  </Tooltip>
+                </ToggleButtonGroup>
+                <Tooltip title="レイアウトを初期状態にリセット" arrow>
+                  <ToggleButton size="medium" value="reset" disabled={!dataLoaded} onChange={onReset}>
+                    <RefreshIcon />
+                  </ToggleButton>
+                </Tooltip>
 
-        <ToggleButtonGroup
-          size="small" color="primary" value={selectedTool} exclusive onChange={handleToolGroupChange}
-        >
-          {toolsButtons}{/* ツールボタン群 */}
-        </ToggleButtonGroup>
+                <Tooltip title="断面の切替 (axial ⇄ coronal ⇄ sagittal)" arrow>
+                  <ToggleButton size="medium" value="toggleOrientation" disabled={!dataLoaded} onClick={toggleOrientation}>
+                    <CameraswitchIcon />
+                  </ToggleButton>
+                </Tooltip>
 
-        {folderList && folderList.length > 0 && ( // フォルダ切替UI
-          <ToggleButtonGroup
-            size="small" color="secondary" value={selectedFolder} exclusive
-            onChange={(e, f) => { if (f) onSelectFolder(f); }}
-          >
-            {folderList.map((folder) => ( // 各フォルダをボタン化
-              <ToggleButton key={folder} value={folder} title={folder}>{folder}</ToggleButton>
-            ))}
-          </ToggleButtonGroup>
-        )}
+                <Tooltip title="DICOMタグを表示" arrow>
+                  <ToggleButton size="medium" value="tags" disabled={!dataLoaded} onClick={handleTagsDialogOpen}>
+                    <LibraryBooksIcon />
+                  </ToggleButton>
+                </Tooltip>
 
-        <ToggleButton size="small" value="reset" title="Reset" disabled={!dataLoaded} onChange={onReset}>
-          <RefreshIcon />
-        </ToggleButton>
-
-        <ToggleButton size="small" value="toggleOrientation" title="Toggle Orientation" disabled={!dataLoaded} onClick={toggleOrientation}>
-          <CameraswitchIcon />
-        </ToggleButton>
-
-        <ToggleButton size="small" value="tags" title="Tags" disabled={!dataLoaded} onClick={handleTagsDialogOpen}>
-          <LibraryBooksIcon />
-        </ToggleButton>
-
-        <Dialog
-          open={showDicomTags} onClose={handleTagsDialogClose} slots={{ transition: TransitionUp }}
-        >
-          <AppBar className={classes.appBar} position="sticky">
-            <Toolbar>
-              <IconButton color="inherit" onClick={handleTagsDialogClose} aria-label="Close"><CloseIcon /></IconButton>
-              <Typography variant="h6" color="inherit" className={classes.flex}>DICOM Tags</Typography>
-            </Toolbar>
-          </AppBar>
-          <TagsTable data={metaData} />{/* メタデータテーブル */}
-        </Dialog>
-      </Stack>
-
-      <div id="layerGroup0" className="layerGroup">{/* dwvが描画する領域 */}
-        <div id="dropBox">{/* ドロップ領域（案内テキストはJSで不要化） */}</div>
-      </div>
+                <Dialog
+                  open={showDicomTags} onClose={handleTagsDialogClose} TransitionComponent={TransitionUp}
+                >
+                  <AppBar className={classes.appBar} position="sticky">
+                    <Toolbar>
+                      <IconButton color="inherit" onClick={handleTagsDialogClose} aria-label="Close"><CloseIcon /></IconButton>
+                      <Typography variant="h6" color="inherit" sx={{ flex: 1 }}>DICOM Tags</Typography>
+                    </Toolbar>
+                  </AppBar>
+                  <TagsTable data={metaData} />{/* メタデータテーブル */}
+                </Dialog>
+              </Box>
+              <Box sx={{ height: '100%', width: '100%', overflow: 'hidden',}}>
+                <div id="layerGroup0" className="layerGroup"></div>
+              </Box>
+            </Box>
+          </Paper>
+        </Grid>
+       </Grid>
     </Root>
   );
 };
