@@ -1,6 +1,6 @@
 // UI部品（MUI）をインポート
 import {
-  Box, InputAdornment, Paper, Slider, Stack, Table, TableBody, TableCell,
+  Box, InputAdornment, Slider, Stack, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField
 } from '@mui/material'; // 表や入力
 import { styled } from '@mui/material/styles'; // スタイルユーティリティ
@@ -29,7 +29,8 @@ const Root = styled('div')(({ theme }) => ({ // ルート用
   [`& .${classes.spacer}`]: { flex: '1 1 100%' },      // 余白
   [`& .${classes.searchField}`]: { width: '45%' },     // 入力幅
   [`& .${classes.slider}`]: { margin: 20 },            // 余白
-  [`&.${classes.container}`]: { padding: 10, overflow: 'hidden' } // 内側余白
+  // Box 内に埋め込む前提: 余白を最小化し、スクロールは親に委ねる
+  [`&.${classes.container}`]: { padding: 0 }
 }));
 
 // 関数コンポーネント
@@ -64,7 +65,14 @@ const TagsTable = ({ data }) => { // props: data=全メタ
 
   // DICOMでない場合の reduce（key/valueフラット化）
   const reducePlainTags = useCallback((tagData) => (acc, key) => { // 平坦化
-    acc.push({ name: key, value: tagData[key].value }); // 1行追加
+    // Pixel Data は表示しない（巨大データ）
+    if (key === '7FE00010' || key === '7fe00010') {
+      return acc;
+    }
+    let val = tagData[key].value;
+    let str = String(val);
+    if (str.length > 200) str = str.slice(0, 200) + `... (len:${str.length})`;
+    acc.push({ name: key, value: str }); // 1行追加
     return acc; // 蓄積を返す
   }, []); // 依存なし
 
@@ -95,11 +103,17 @@ const TagsTable = ({ data }) => { // props: data=全メタ
           acc = acc.concat(rows);                 // 結果に連結
         }
       } else {
+        // Pixel Data は表示しない
+        if (name === 'Pixel Data') {
+          return acc;
+        }
         // Other系の巨大データは先頭だけ
         if (el.vr?.[0] === 'O' && val?.length > 10) {
           val = val.slice(0, 10).toString() + `... (len:${val.length})`; // 先頭のみ
         }
-        acc.push({ name: (prefix ? prefix + ' ' : '') + name, value: String(val) }); // 1行
+        let str = String(val);
+        if (str.length > 200) str = str.slice(0, 200) + `... (len:${str.length})`;
+        acc.push({ name: (prefix ? prefix + ' ' : '') + name, value: str }); // 1行
       }
       return acc; // 返却
     };
@@ -155,26 +169,24 @@ const TagsTable = ({ data }) => { // props: data=全メタ
         </Box>
       </Stack>
 
-      <Paper sx={{ width: '100%', overflow: 'hidden' }}>{/* 表コンテナ */}
-        <TableContainer sx={{ maxHeight: 400 }}>{/* スクロールable領域 */}
-          <Table stickyHeader>{/* ヘッダ固定テーブル */}
-            <TableHead>
-              <TableRow>
-                <TableCell>Tag</TableCell>{/* タグ名 */}
-                <TableCell>Value</TableCell>{/* 値 */}
+      <TableContainer sx={{ width: '100%', overflowX: 'hidden' }}>{/* 親Boxがスクロール管理 */}
+        <Table size="small" stickyHeader sx={{ tableLayout: 'fixed' }}>{/* ヘッダ固定テーブル */}
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ width: '40%' }}>Tag</TableCell>{/* タグ名 */}
+              <TableCell sx={{ width: '60%' }}>Value</TableCell>{/* 値 */}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {displayData.map((item, idx) => ( // 各行レンダ
+              <TableRow key={idx}>
+                <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{item.name}</TableCell>{/* 名前 */}
+                <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{item.value}</TableCell>{/* 値 */}
               </TableRow>
-            </TableHead>
-            <TableBody>
-              {displayData.map((item, idx) => ( // 各行レンダ
-                <TableRow key={idx}>
-                  <TableCell>{item.name}</TableCell>{/* 名前 */}
-                  <TableCell>{item.value}</TableCell>{/* 値 */}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </Root>
   );
 };

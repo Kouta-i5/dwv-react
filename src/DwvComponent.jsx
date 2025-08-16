@@ -1,17 +1,16 @@
 // MUIのコンポーネントをインポート
 import {
-  AppBar,
   Box,
   Button,
-  Dialog,
   Divider,
   Grid,
-  IconButton, LinearProgress,
+  LinearProgress,
   List, ListItem,
   ListItemText,
   Paper,
   Slide,
-  ToggleButton, ToggleButtonGroup, Toolbar, Tooltip, Typography
+  ToggleButton, ToggleButtonGroup,
+  Tooltip, Typography
 } from '@mui/material'; // UI部品一式
 import { styled } from '@mui/material/styles'; // スタイルユーティリティ
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'; // Reactのフック群
@@ -24,11 +23,9 @@ import TagsTable from './TagsTable.jsx'; // DICOMタグ表示用
 
 // アイコンをインポート
 import CameraswitchIcon from '@mui/icons-material/Cameraswitch'; // 断面切替
-import CloseIcon from '@mui/icons-material/Close'; // 閉じる
 import ContrastIcon from '@mui/icons-material/Contrast'; // WL/WW
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'; // フォルダ選択
 import InvertColorsOffIcon from '@mui/icons-material/InvertColorsOff'; // グレースケール
-import LibraryBooksIcon from '@mui/icons-material/LibraryBooks'; // タグ表示
 import MenuIcon from '@mui/icons-material/Menu'; // スクロール
 import PaletteIcon from '@mui/icons-material/Palette'; // カラー
 import RefreshIcon from '@mui/icons-material/Refresh'; // リセット
@@ -360,7 +357,7 @@ const DwvComponent = () => { // ビューワ本体
         onChange={onInputFile}      // 変更時の処理
       />
        <Grid container spacing={0} sx={{ flex: 1, height: '100%', overflow: 'hidden' }}>
-        <Grid size={3} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
+        <Grid size={2} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
           <Paper sx={{ height: '100%', width: '100%' }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', height: '100%' }}>
               <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
@@ -394,7 +391,6 @@ const DwvComponent = () => { // ビューワ本体
                     <Divider />
                     {selectedFolder && (folderMap?.[selectedFolder]?.length || 0) > 0 && (
                       <>
-                        <Divider sx={{ my: 0.5 }} />
                         {folderMap[selectedFolder].map((file) => (
                           <ListItem key={file.webkitRelativePath || file.name} sx={{ pl: 2 }}>
                             <ListItemText
@@ -412,7 +408,7 @@ const DwvComponent = () => { // ビューワ本体
             </Box>
           </Paper>
         </Grid>
-        <Grid size={9} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
+        <Grid size={7} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
           <Paper sx={{ height: '100%', width: '100%' }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
@@ -447,28 +443,20 @@ const DwvComponent = () => { // ビューワ本体
                     <CameraswitchIcon />
                   </ToggleButton>
                 </Tooltip>
-
-                <Tooltip title="DICOMタグを表示" arrow>
-                  <ToggleButton size="medium" value="tags" disabled={!dataLoaded} onClick={handleTagsDialogOpen}>
-                    <LibraryBooksIcon />
-                  </ToggleButton>
-                </Tooltip>
-
-                <Dialog
-                  open={showDicomTags} onClose={handleTagsDialogClose} TransitionComponent={TransitionUp}
-                >
-                  <AppBar className={classes.appBar} position="sticky">
-                    <Toolbar>
-                      <IconButton color="inherit" onClick={handleTagsDialogClose} aria-label="Close"><CloseIcon /></IconButton>
-                      <Typography variant="h6" color="inherit" sx={{ flex: 1 }}>DICOM Tags</Typography>
-                    </Toolbar>
-                  </AppBar>
-                  <TagsTable data={metaData} />{/* メタデータテーブル */}
-                </Dialog>
               </Box>
               <Box sx={{ height: '100%', width: '100%', overflow: 'hidden',}}>
                 <div id="layerGroup0" className="layerGroup"></div>
               </Box>
+            </Box>
+          </Paper>
+        </Grid>
+        <Grid size={3} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
+          <Paper sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Box sx={{ p: 1 }}>
+              <Typography variant="h6">DICOM Tags</Typography>
+            </Box>
+            <Box sx={{ flex: 1, overflow: 'auto', px: 1, pb: 1 }}>
+              <TagsTable data={metaData} />
             </Box>
           </Paper>
         </Grid>
