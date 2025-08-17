@@ -9,6 +9,7 @@ import {
   ListItemText,
   Paper,
   Slide,
+  Slider,
   ToggleButton, ToggleButtonGroup,
   Tooltip, Typography
 } from '@mui/material'; // UI部品一式
@@ -25,9 +26,7 @@ import TagsTable from './TagsTable.jsx'; // DICOMタグ表示用
 import CameraswitchIcon from '@mui/icons-material/Cameraswitch'; // 断面切替
 import ContrastIcon from '@mui/icons-material/Contrast'; // WL/WW
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'; // フォルダ選択
-import InvertColorsOffIcon from '@mui/icons-material/InvertColorsOff'; // グレースケール
 import MenuIcon from '@mui/icons-material/Menu'; // スクロール
-import PaletteIcon from '@mui/icons-material/Palette'; // カラー
 import RefreshIcon from '@mui/icons-material/Refresh'; // リセット
 import SearchIcon from '@mui/icons-material/Search'; // ズーム/パン
 import StraightenIcon from '@mui/icons-material/Straighten'; // 物差し(計測)
@@ -65,8 +64,7 @@ const DwvComponent = () => { // ビューワ本体
   const [versions] = useState({ dwv: getDwvVersion(), react: React.version }); // 表示用
 
   // 有効ツール一覧（固定）
-  const [tools] = useState({ // 使用可能ツール
-    Scroll: {},             // スクロール
+  const [tools] = useState({ // 使用可能ツール（スクロールは無効化）
     ZoomAndPan: {},         // ズーム＆パン
     WindowLevel: {},        // WL/WW
     Draw: { options: ['Ruler'] } // 計測：物差し
@@ -89,13 +87,14 @@ const DwvComponent = () => { // ビューワ本体
   const [orientation, setOrientation] = useState(undefined); // axial/coronal/sagittal
   const [showDicomTags, setShowDicomTags] = useState(false); // タグダイアログ
 
-  // カラーマップ（表示モード）
+  // カラーマップ（表示モード）: 機能停止のため固定
   const [colorMap, setColorMap] = useState('grayscale'); // 既定は白黒
 
   // フォルダ読み込み用の状態
   const [folderMap, setFolderMap] = useState(null); // { folderName: File[] }
   const [folderList, setFolderList] = useState([]); // フォルダ名一覧
   const [selectedFolder, setSelectedFolder] = useState(null); // 選択中フォルダ
+  const [currentFileIndex, setCurrentFileIndex] = useState(0); // フォルダ内の現在インデックス
 
   // input[type=file] を制御するref
   const inputRef = useRef(null); // 隠しファイル入力を直接操作
@@ -148,6 +147,8 @@ const DwvComponent = () => { // ビューワ本体
     if (dwvApp) dwvApp.resetLayout(); // 初期状態へ
   }, [dwvApp]); // 依存
 
+  // （ツールバーの一括/単体ダウンロードは撤去。各行のDLボタンを使用）
+
   // 表示断面のトグル切替
   const toggleOrientation = useCallback(() => { // 断面切替
     if (!dwvApp) return; // 未初期化回避
@@ -174,14 +175,14 @@ const DwvComponent = () => { // ビューワ本体
   const applyColorMapCss = useCallback((mode) => {
     const canvases = document.querySelectorAll('#layerGroup0 canvas');
     canvases.forEach((canvas) => {
-      canvas.style.filter = mode === 'grayscale' ? 'grayscale(1)' : 'none';
+      canvas.style.filter = 'grayscale(1)'; // 常に白黒
     });
   }, []);
 
-  const onChangeColorMap = useCallback((e, mode) => {
-    if (!mode) return;
-    setColorMap(mode);
-    applyColorMapCss(mode);
+  const onChangeColorMap = useCallback(() => {
+    // 一旦カラーマップ切替機能は無効化
+    setColorMap('grayscale');
+    applyColorMapCss('grayscale');
   }, [applyColorMapCss]);
 
   // カラーマップの再適用（データ読み込み直後や切替時に確実に反映）
@@ -207,6 +208,7 @@ const DwvComponent = () => { // ビューワ本体
     setFolderMap(map);        // map保存
     setFolderList(list);      // 一覧保存
     setSelectedFolder(first); // 選択保存
+    setCurrentFileIndex(0);
     setDataLoaded(false);     // ロード中へ
     setLoadProgress(0);       // 進捗リセット
     if (!dwvApp) return;      // ガード
@@ -222,11 +224,26 @@ const DwvComponent = () => { // ビューワ本体
   const onSelectFolder = useCallback((folder) => { // フォルダ選択
     if (!folder || !folderMap || !dwvApp) return; // ガード
     setSelectedFolder(folder);  // 選択更新
+    setCurrentFileIndex(0);
     setDataLoaded(false);       // ロード中へ
     setLoadProgress(0);         // 進捗リセット
-    // dwvApp.resetLayout();       // レイアウト初期化
+    dwvApp.resetLayout();       // レイアウト初期化
     dwvApp.loadFiles(folderMap[folder]); // 該当フォルダ読込
   }, [dwvApp, folderMap]); // 依存
+
+  // スライダ変更でファイル切替
+  const onFileSliderChange = useCallback((e, value) => {
+    if (!selectedFolder || !folderMap || !dwvApp) return;
+    if (typeof value !== 'number') return;
+    const files = folderMap[selectedFolder] || [];
+    const idx = Math.min(Math.max(0, value), Math.max(0, files.length - 1));
+    setCurrentFileIndex(idx);
+    const file = files[idx];
+    if (file) {
+      dwvApp.resetLayout();
+      dwvApp.loadFiles([file]);
+    }
+  }, [dwvApp, folderMap, selectedFolder]);
 
   // showDropbox などのD&D制御は撤去
 
@@ -257,10 +274,10 @@ const DwvComponent = () => { // ビューワ本体
       isFirstRender = false;      // 初回処理を終えた
       const vl = app.getViewLayersByDataId(event.dataid)[0]; // ViewLayer取得
       const vc = vl.getViewController(); // ビューコントローラ
-      if (vc.canScroll()) setCanScroll(true); // スクロール可否を反映
+      // スクロールは使わない
       if (vc.isMonochrome()) setCanWindowLevel(true); // WL可否を反映
-      // 既定ツールを決定（スクロール可能ならScroll、なければZoomAndPan）
-      const initial = vc.canScroll() ? 'Scroll' : 'ZoomAndPan'; // 初期ツール
+      // 既定ツールは常にズーム/パン
+      const initial = 'ZoomAndPan';
       setSelectedTool(initial); // UI更新
       app.setTool(initial);     // dwv側も切替
       // 初回描画時にレイアウトをフィット（ズーム・センタリングを適正化）
@@ -385,7 +402,6 @@ const DwvComponent = () => { // ビューワ本体
                       <ListItemText
                         primary={`選択中フォルダ: ${selectedFolder || '(未選択)'}`}
                         primaryTypographyProps={{ variant: 'body2' }}
-                        onClick={() => onSelectFolder(selectedFolder)}
                       />
                     </ListItem>
                     <Divider />
@@ -408,43 +424,43 @@ const DwvComponent = () => { // ビューワ本体
             </Box>
           </Paper>
         </Grid>
-        <Grid size={7} sx={{ height: '100%', p: 2, overflow: 'hidden' }}>
-          <Paper sx={{ height: '100%', width: '100%' }}>
+        <Grid size={7} sx={{ height: '100%', p: 2, overflow: 'auto' }}>
+          <Paper sx={{ height: '100%', width: '100%', overflow: 'auto' }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', p: 1, m: 1 }}>
                 <ToggleButtonGroup
                   size="medium" color="primary" value={selectedTool} exclusive onChange={handleToolGroupChange}
                 >
                   {toolsButtons}{/* ツールボタン群 */}
-                </ToggleButtonGroup>
-                <ToggleButtonGroup
-                  size="medium" color="secondary" value={colorMap} exclusive onChange={onChangeColorMap}
-                  sx={{ ml: 1 }}
-                >
-                  <Tooltip title="カラー表示: 擬似カラーを適用" arrow>
-                    <ToggleButton value="color">
-                      <PaletteIcon />
-                    </ToggleButton>
-                  </Tooltip>
-                  <Tooltip title="グレースケール: 白黒表示に切り替え" arrow>
-                    <ToggleButton value="grayscale">
-                      <InvertColorsOffIcon />
-                    </ToggleButton>
-                  </Tooltip>
                 </ToggleButtonGroup>
                 <Tooltip title="レイアウトを初期状態にリセット" arrow>
                   <ToggleButton size="medium" value="reset" disabled={!dataLoaded} onChange={onReset}>
                     <RefreshIcon />
                   </ToggleButton>
                 </Tooltip>
-
                 <Tooltip title="断面の切替 (axial ⇄ coronal ⇄ sagittal)" arrow>
                   <ToggleButton size="medium" value="toggleOrientation" disabled={!dataLoaded} onClick={toggleOrientation}>
                     <CameraswitchIcon />
                   </ToggleButton>
                 </Tooltip>
+                {/* 一括/単体DLボタンは一覧側へ移動済み */}
               </Box>
-              <Box sx={{ height: '100%', width: '100%', overflow: 'hidden',}}>
+              {selectedFolder && (
+                <Box sx={{ display: 'flex', alignItems: 'center', ml: 2, width: 240 }}>
+                  <Slider
+                    size="small"
+                    min={0}
+                    step={1}
+                    max={Math.max(0, (folderMap?.[selectedFolder]?.length || 1) - 1)}
+                    value={currentFileIndex}
+                    onChange={onFileSliderChange}
+                  />
+                  <Typography variant="body2" sx={{ ml: 1 }}>
+                    {currentFileIndex + 1}
+                  </Typography>
+                </Box>
+              )}
+              <Box sx={{ height: '100%', width: '100%', p: 1, m: 1 }}>
                 <div id="layerGroup0" className="layerGroup"></div>
               </Box>
             </Box>

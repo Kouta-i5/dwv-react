@@ -1,6 +1,6 @@
 // UI部品（MUI）をインポート
 import {
-  Box, InputAdornment, Slider, Stack, Table, TableBody, TableCell,
+  InputAdornment, Stack, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField
 } from '@mui/material'; // 表や入力
 import { styled } from '@mui/material/styles'; // スタイルユーティリティ
@@ -41,24 +41,8 @@ const TagsTable = ({ data }) => { // props: data=全メタ
   // DICOMメタかどうかを判定
   const isDicomMeta = useMemo(() => typeof fullMetaData['00020010'] !== 'undefined', [fullMetaData]); // FileMeta有無
 
-  // InstanceNumber配列を抽出（なければ空）
-  const instanceNumbers = useMemo(() => { // スライダ候補
-    const el = fullMetaData['00200013']; // InstanceNumberタグ
-    if (typeof el === 'undefined') return []; // なし
-    let vals = el.value; // 値（配列/文字列）
-    if (typeof vals === 'string') vals = [vals]; // 文字列→配列
-    const nums = vals.map(Number).filter((v) => !Number.isNaN(v)); // 数値化
-    nums.sort((a, b) => a - b); // 昇順
-    return nums; // 返却
-  }, [fullMetaData]); // 依存
-
-  // スライダの最小/最大インデックス
-  const sliderMin = 0;                           // 最小インデックス
-  const sliderMax = Math.max(0, instanceNumbers.length - 1); // 最大インデックス
-
-  // 現在のスライダ位置（インデックス）と対応する実InstanceNumber
-  const [sliderIndex, setSliderIndex] = useState(sliderMin);  // インデックス
-  const instanceNumber = instanceNumbers.length ? instanceNumbers[sliderIndex] : 0; // 実値
+  // 表示インスタンス（スライダ撤去: 常に 0）
+  const instanceNumber = 0;
 
   // 検索語
   const [searchfor, setSearchfor] = useState(''); // 小文字比較用
@@ -143,10 +127,7 @@ const TagsTable = ({ data }) => { // props: data=全メタ
     });
   }, [metaArray, searchfor]); // 依存
 
-  // スライダ変更（MUIのonChangeは (e, value) で来る）
-  const onSliderChange = useCallback((e, value) => { // スライダ変更
-    if (typeof value === 'number') setSliderIndex(value); // インデックス更新
-  }, []); // 依存なし
+  // スライダ撤去に伴い、変更ハンドラも不要
 
   // 検索入力変更
   const onSearch = useCallback((e) => { setSearchfor(e.target.value); }, []); // 文字列更新
@@ -154,19 +135,12 @@ const TagsTable = ({ data }) => { // props: data=全メタ
   // JSX（表と検索UI）
   return (
     <Root className={classes.container}>{/* ルート */}
-      <Stack direction="row" spacing={2}>{/* 上段: 検索とスライダ */}
+      <Stack direction="row" spacing={2}>{/* 上段: 検索 */}
         <TextField
           id="search" type="search" value={searchfor} className={classes.searchField}
           onChange={onSearch} margin="normal" size="small"
           slotProps={{ input: { startAdornment: (<InputAdornment position="start"><Search /></InputAdornment>) } }}
         />
-        <Box width={300} display="flex" alignItems="center">{/* スライダと現在値 */}
-          <Slider
-            title="Instance number" className={classes.slider} marks
-            min={sliderMin} max={sliderMax} value={sliderIndex} onChange={onSliderChange}
-          />
-          <div title="Instance number">{instanceNumber}</div>{/* 現在の実値 */}
-        </Box>
       </Stack>
 
       <TableContainer sx={{ width: '100%', overflowX: 'hidden' }}>{/* 親Boxがスクロール管理 */}
